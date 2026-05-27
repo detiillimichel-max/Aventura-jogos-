@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Git Commit Runner</title>
+  <meta name="theme-color" content="#7C3AED">
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="assets/css/style.css">
+  <link rel="icon" href="assets/icons/icon-192.png">
+</head>
+<body>
+  <div id="gameContainer">
+    <canvas id="gameCanvas"></canvas>
+    
+    <div id="ui">
+      <div id="score">Commits: <span id="scoreValue">0</span></div>
+      <div id="highscore">Recorde: <span id="highscoreValue">0</span></div>
+    </div>
+
+    <div id="menu" class="overlay">
+      <h1>GIT COMMIT RUNNER</h1>
+      <img src="assets/img/player.png" alt="Player" class="player-preview">
+      <p>Deslize ← → para desviar dos bugs<br>Colete commits para pontuar</p>
+      <button id="btnStart">TOCAR PARA JOGAR</button>
+      <p class="dica">PWA: Adicione à tela inicial</p>
+    </div>
+
+    <div id="gameOver" class="overlay hidden">
+      <h2>GAME OVER</h2>
+      <p>Commits coletados: <span id="finalScore">0</span></p>
+      <p>Recorde: <span id="finalHighscore">0</span></p>
+      <button id="btnRestart">JOGAR NOVAMENTE</button>
+    </div>
+  </div>
+
+  <script src="assets/js/config.js"></script>
+  <script src="assets/js/game.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js');
+    }
+  </script>
+</body>
+</html>
