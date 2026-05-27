@@ -1,243 +1,470 @@
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
+(function(){
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreSpan = document.getElementById('scoreValue');
+    const speedSpan = document.getElementById('speedValue');
+    const restartBtn = document.getElementById('restartButton');
+    const statusDiv = document.getElementById('gameStatus');
 
-CONFIG.LANE_WIDTH = canvas.width / CONFIG.LANES;
+    let width = 800;
+    let height = 500;
+    let laneWidth = 90;
+    let lanes = 3;
+    let playerLane = 1;
 
-let player = {
-  lane: 1,
-  y: canvas.height - 150,
-  targetX: canvas.width / 2,
-  x: canvas.width / 2,
-  jumping: false,
-  jumpVel: 0
-};
+    let lanePositions = [];
+    let player = { x: 0, y: 0, width: 38, height: 48, isJumping: false, jumpYOffset: 0 };
+    let normalY = 0;
 
-let obstacles = [];
-let coins = [];
-let score = 0;
-let highscore = localStorage.getItem('gitRunnerHighscore') || 0;
-let speed = CONFIG.BASE_SPEED;
-let gameRunning = false;
-let particles = [];
+    let coins = [];
+    let trains = [];
+    let score = 0;
+    let gameRunning = true;
+    let frame = 0;
+    let spawnCounter = 0;
+    let speed = 5.2;
+    let baseSpeed = 5.2;
 
-const playerImg = new Image();
-playerImg.src = 'assets/img/player.png';
+    let leftPressed = false;
+    let rightPressed = false;
+    let jumpRequest = false;
+    let jumpCooldown = false;
+    let particles = [];
 
-document.getElementById('highscoreValue').textContent = highscore;
-
-// Controles
-let touchStartX = 0;
-canvas.addEventListener('touchstart', e => {
-  touchStartX = e.touches[0].clientX;
-});
-
-canvas.addEventListener('touchend', e => {
-  if (!gameRunning) return;
-  const touchEndX = e.changedTouches[0].clientX;
-  const diff = touchEndX - touchStartX;
-  
-  if (Math.abs(diff) > 50) {
-    if (diff > 0 && player.lane < CONFIG.LANES - 1) player.lane++;
-    if (diff < 0 && player.lane > 0) player.lane--;
-  } else {
-    jump();
-  }
-});
-
-// Teclado para teste no PC
-document.addEventListener('keydown', e => {
-  if (!gameRunning) return;
-  if (e.key === 'ArrowLeft' && player.lane > 0) player.lane--;
-  if (e.key === 'ArrowRight' && player.lane < CONFIG.LANES - 1) player.lane++;
-  if (e.key === 'ArrowUp' || e.key === ' ') jump();
-});
-
-function jump() {
-  if (!player.jumping) {
-    player.jumping = true;
-    player.jumpVel = -15;
-  }
-}
-
-function spawnObstacle() {
-  const lane = Math.floor(Math.random() * CONFIG.LANES);
-  obstacles.push({
-    x: lane * CONFIG.LANE_WIDTH + CONFIG.LANE_WIDTH/2 - CONFIG.OBSTACLE_SIZE/2,
-    y: -CONFIG.OBSTACLE_SIZE,
-    lane: lane,
-    type: 'bug'
-  });
-}
-
-function spawnCoin() {
-  const lane = Math.floor(Math.random() * CONFIG.LANES);
-  coins.push({
-    x: lane * CONFIG.LANE_WIDTH + CONFIG.LANE_WIDTH/2 - CONFIG.COIN_SIZE/2,
-    y: -CONFIG.COIN_SIZE,
-    lane: lane
-  });
-}
-
-function update() {
-  if (!gameRunning) return;
-
-  // Movimento suave do player
-  player.targetX = player.lane * CONFIG.LANE_WIDTH + CONFIG.LANE_WIDTH/2;
-  player.x += (player.targetX - player.x) * 0.2;
-
-  // Pulo
-  if (player.jumping) {
-    player.y += player.jumpVel;
-    player.jumpVel += 0.8;
-    if (player.y >= canvas.height - 150) {
-      player.y = canvas.height - 150;
-      player.jumping = false;
+    function initLanes(){
+        lanePositions = [];
+        let startX = (width - (laneWidth * lanes)) / 2;
+        for(let i=0; i<lanes; i++){
+            lanePositions.push(startX + i * laneWidth + laneWidth/2);
+        }
+        normalY = height - 82;
+        player.y = normalY;
+        player.jumpYOffset = 0;
+        player.isJumping = false;
     }
-  }
 
-  // Spawn
-  if (Math.random() < CONFIG.SPAWN_RATE) spawnObstacle();
-  if (Math.random() < CONFIG.COIN_RATE) spawnCoin();
-
-  // Update obstáculos
-  obstacles = obstacles.filter(obs => {
-    obs.y += speed;
-    
-    // Colisão
-    if (!player.jumping && 
-        Math.abs(obs.x + CONFIG.OBSTACLE_SIZE/2 - player.x) < 40 &&
-        Math.abs(obs.y + CONFIG.OBSTACLE_SIZE/2 - player.y) < 50) {
-      gameOver();
-      return false;
+    function resizeCanvas(){
+        canvas.width = width;
+        canvas.height = height;
+        initLanes();
+        player.x = lanePositions[playerLane] - player.width/2;
+        player.y = normalY - player.jumpYOffset;
     }
-    
-    return obs.y < canvas.height;
-  });
 
-  // Update moedas
-  coins = coins.filter(coin => {
-    coin.y += speed;
-    
-    if (Math.abs(coin.x + CONFIG.COIN_SIZE/2 - player.x) < 35 &&
-        Math.abs(coin.y + CONFIG.COIN_SIZE/2 - player.y) < 45) {
-      score++;
-      document.getElementById('scoreValue').textContent = score;
-      createParticles(coin.x, coin.y);
-      return false;
+    function spawnCoin(){
+        let lane = Math.floor(Math.random() * lanes);
+        let xPos = lanePositions[lane] - 12; // AGORA SIM CORRIGIDO
+        coins.push({
+            x: xPos,
+            y: height - 68,
+            width: 24,
+            height: 24,
+            lane: lane,
+            collected: false
+        });
     }
-    
-    return coin.y < canvas.height;
-  });
 
-  // Partículas
-  particles = particles.filter(p => {
-    p.y -= p.vy;
-    p.x += p.vx;
-    p.life--;
-    return p.life > 0;
-  });
+    function spawnTrain(){
+        let lane = Math.floor(Math.random() * lanes);
+        let xPos = lanePositions[lane] - 28; // AGORA SIM CORRIGIDO
+        trains.push({
+            x: xPos,
+            y: height - 72,
+            width: 56,
+            height: 58,
+            lane: lane
+        });
+    }
 
-  speed += CONFIG.SPEED_INCREMENT;
-}
+    function updateDifficulty(){
+        let newSpeed = baseSpeed + Math.floor(score / 500) * 0.7;
+        if(newSpeed > 14) newSpeed = 14;
+        speed = newSpeed;
+        speedSpan.innerText = speed.toFixed(1);
+    }
 
-function createParticles(x, y) {
-  for (let i = 0; i < 8; i++) {
-    particles.push({
-      x: x,
-      y: y,
-      vx: (Math.random() - 0.5) * 4,
-      vy: Math.random() * 3 + 2,
-      life: 30,
-      color: '#EC4899'
+    function addParticle(x,y, color){
+        particles.push({
+            x: x, y: y, vx: (Math.random() - 0.5)*3, vy: (Math.random() - 0.5)*3 - 2,
+            life: 0.8, size: 4+Math.random()*5, color: color
+        });
+    }
+
+    function updateGame(){
+        if(!gameRunning) return;
+
+        if(jumpRequest &&!player.isJumping &&!jumpCooldown){
+            player.isJumping = true;
+            player.jumpYOffset = 0;
+            jumpCooldown = true;
+            setTimeout(() => { jumpCooldown = false; }, 300);
+            jumpRequest = false;
+        }
+
+        if(player.isJumping){
+            if(player.jumpYOffset < 22){
+                player.jumpYOffset += 2.6;
+                player.y = normalY - player.jumpYOffset;
+            } else {
+                player.isJumping = false;
+                player.jumpYOffset = 0;
+                player.y = normalY;
+            }
+        } else {
+            player.y = normalY;
+        }
+
+        let newLane = playerLane;
+        if(leftPressed) newLane--;
+        if(rightPressed) newLane++;
+        if(newLane >=0 && newLane < lanes){
+            if(newLane!== playerLane){
+                playerLane = newLane;
+            }
+        }
+        player.x = lanePositions[playerLane] - player.width/2;
+
+        for(let i=0; i<coins.length; i++){
+            let coin = coins[i];
+            coin.x -= speed;
+            let colX = (player.x < coin.x+coin.width && player.x+player.width > coin.x);
+            let colY = (player.y+player.height-8 > coin.y && player.y+12 < coin.y+coin.height);
+            if(colX && colY &&!coin.collected){
+                coin.collected = true;
+                score += 10;
+                scoreSpan.innerText = Math.floor(score);
+                addParticle(coin.x+12, coin.y+12, "#FFD966");
+                updateDifficulty();
+            }
+        }
+        coins = coins.filter(c =>!c.collected && c.x + c.width > 0);
+
+        for(let i=0; i<trains.length; i++){
+            let train = trains[i];
+            train.x -= speed;
+            let collideX = (player.x < train.x+train.width && player.x+player.width > train.x);
+            let collideY = (player.y+player.height-12 > train.y && player.y+18 < train.y+train.height);
+            if(collideX && collideY){
+                if(player.isJumping && player.jumpYOffset > 16){
+                    addParticle(train.x+28, train.y+20, "#FFA07A");
+                    trains.splice(i,1);
+                    i--;
+                    continue;
+                } else {
+                    gameRunning = false;
+                    statusDiv.innerHTML = '<i data-lucide="skull"></i> GAME OVER! Pressione CORRER';
+                    lucide.createIcons();
+                    return;
+                }
+            }
+        }
+        trains = trains.filter(t => t.x + t.width > 0);
+
+        spawnCounter++;
+        let coinRate = Math.max(18, 35 - Math.floor(score/300));
+        if(spawnCounter > coinRate){
+            spawnCoin();
+            spawnCounter = 0;
+            if(Math.random()<0.38 && gameRunning){
+                spawnTrain();
+            }
+        } else if(spawnCounter % 27 === 0 && gameRunning && Math.random()<0.45){
+            if(trains.length < 3) spawnTrain();
+        }
+
+        for(let i=0;i<particles.length;i++){
+            particles[i].x += particles[i].vx;
+            particles[i].y += particles[i].vy;
+            particles[i].life -= 0.025;
+            particles[i].vy += 0.2;
+        }
+        particles = particles.filter(p => p.life > 0 && p.y < height+50);
+
+        if(frame % 90 === 0 && gameRunning){
+            score += 2;
+            scoreSpan.innerText = Math.floor(score);
+            updateDifficulty();
+        }
+        frame++;
+    }
+
+    function drawBackground(){
+        const gradSky = ctx.createLinearGradient(0,0,0,height);
+        gradSky.addColorStop(0,"#1c4e70");
+        gradSky.addColorStop(1,"#102b3f");
+        ctx.fillStyle = gradSky;
+        ctx.fillRect(0,0,width,height);
+
+        for(let i=0;i<lanes;i++){
+            let railX = lanePositions[i] - laneWidth/2;
+            ctx.fillStyle = "#4a5b6e";
+            ctx.fillRect(railX-8, height-48, laneWidth+16, 12);
+            ctx.fillStyle = "#2d3e4b";
+            ctx.fillRect(railX-4, height-48, laneWidth+8, 6);
+            for(let d=0;d<8;d++){
+                ctx.fillStyle = "#8b5a2b";
+                ctx.fillRect(railX + (d*20) - (frame*2%40), height-42, 12, 8);
+            }
+        }
+
+        ctx.fillStyle = "#021c2c";
+        for(let b=0;b<12;b++){
+            let h = 60 + Math.sin(b + frame*0.01)*30;
+            ctx.fillRect(40+b*70, height-130-h, 30, h);
+            ctx.fillStyle = "#ffeb3b";
+            if(Math.sin(frame*0.05 + b) > 0) {
+                ctx.fillRect(45+b*70, height-130-h+10, 8, 8);
+                ctx.fillRect(55+b*70, height-130-h+25, 8, 8);
+            }
+            ctx.fillStyle = "#021c2c";
+        }
+    }
+
+    function drawPlayer(){
+        let pX = player.x;
+        let pY = player.y;
+        ctx.shadowColor = "#00e5ff";
+        ctx.shadowBlur = 20;
+        ctx.fillStyle = "#3c9eff";
+        ctx.beginPath();
+        ctx.roundRect(pX, pY, player.width, player.height, 12);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "#ffbc3c";
+        ctx.beginPath();
+        ctx.roundRect(pX+8, pY-8, 22, 12, 8);
+        ctx.fill();
+        ctx.fillStyle = "#000000";
+        ctx.beginPath();
+        ctx.arc(pX+28, pY+18, 6, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = "white";
+        ctx.beginPath();
+        ctx.arc(pX+30, pY+16, 2, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = "#ff6e4a";
+        ctx.beginPath();
+        ctx.rect(pX+8, pY+36, 22, 10);
+        ctx.fill();
+        ctx.fillStyle = "#d4491c";
+        ctx.beginPath();
+        ctx.rect(pX+12, pY-2, 24, 10);
+        ctx.fill();
+    }
+
+    function drawCoin(cx, cy){
+        ctx.shadowColor = "#FFD700";
+        ctx.shadowBlur = 25;
+        ctx.fillStyle = "#FFD700";
+        ctx.beginPath();
+        ctx.arc(cx+12, cy+12, 12, 0, Math.PI*2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "#FFA500";
+        ctx.beginPath();
+        ctx.arc(cx+12, cy+12, 8, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = "bold 16px monospace";
+        ctx.fillText("★", cx+6, cy+18);
+    }
+
+    function drawTrain(t){
+        let tX = t.x;
+        let tY = t.y;
+        ctx.fillStyle = "#4f2d1f";
+        ctx.fillRect(tX, tY, t.width, t.height-6);
+        ctx.fillStyle = "#8b5a2b";
+        ctx.fillRect(tX+5, tY-10, t.width-10, 12);
+        ctx.fillStyle = "#e6b422";
+        ctx.fillRect(tX+10, tY+12, 8, 18);
+        ctx.fillRect(tX+t.width-18, tY+12, 8, 18);
+        ctx.fillStyle = "#363636";
+        ctx.fillRect(tX+20, tY+30, 16, 18);
+        ctx.fillStyle = "#ff0000";
+        ctx.shadowColor = "#ff0000";
+        ctx.shadowBlur = 15;
+        ctx.fillRect(tX+2, tY+2, 6, 6);
+        ctx.shadowBlur = 0;
+    }
+
+    function drawParticles(){
+        for(let p of particles){
+            ctx.globalAlpha = p.life * 0.8;
+            ctx.fillStyle = p.color;
+            ctx.shadowColor = p.color;
+            ctx.shadowBlur = 15;
+            ctx.beginPath();
+            ctx.rect(p.x, p.y, p.size*0.7, p.size*0.7);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.shadowBlur = 0;
+        }
+    }
+
+    function drawUItext(){
+        ctx.font = "bold 32px 'Orbitron'";
+        ctx.fillStyle = "white";
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = "black";
+        if(!gameRunning){
+            ctx.fillStyle = "#ffaa66";
+            ctx.shadowColor = "#ff6a3d";
+            ctx.shadowBlur = 20;
+            ctx.fillText("GAME OVER", width/2-110, 70);
+        }
+        ctx.shadowBlur = 0;
+    }
+
+    function render(){
+        drawBackground();
+        for(let t of trains) drawTrain(t);
+        for(let c of coins) drawCoin(c.x, c.y);
+        drawPlayer();
+        drawParticles();
+        drawUItext();
+    }
+
+    function gameLoop(){
+        updateGame();
+        render();
+        requestAnimationFrame(gameLoop);
+    }
+
+    function handleKeyDown(e){
+        const key = e.key;
+        if(key === 'ArrowLeft'){ leftPressed = true; e.preventDefault();}
+        else if(key === 'ArrowRight'){ rightPressed = true; e.preventDefault();}
+        else if(key === 'ArrowUp' || key === ' '){
+            if(gameRunning){
+                jumpRequest = true;
+            }
+            e.preventDefault();
+        }
+    }
+
+    function handleKeyUp(e){
+        const key = e.key;
+        if(key === 'ArrowLeft') leftPressed = false;
+        if(key === 'ArrowRight') rightPressed = false;
+    }
+
+    let touchStartX = 0;
+    function handleTouchStart(e){
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const touchX = e.touches[0].clientX - rect.left;
+        touchStartX = touchX;
+    }
+
+    function handleTouchMove(e){
+        e.preventDefault();
+        if(!gameRunning) return;
+        const rect = canvas.getBoundingClientRect();
+        let currentX = e.touches[0].clientX - rect.left;
+        let diff = currentX - touchStartX;
+        if(Math.abs(diff) > 25){
+            if(diff > 0 && playerLane < lanes-1){
+                playerLane++;
+                leftPressed=false; rightPressed=false;
+            } else if(diff < 0 && playerLane > 0){
+                playerLane--;
+            }
+            touchStartX = currentX;
+        }
+    }
+
+    function handleTouchEnd(e){
+        e.preventDefault();
+        if(gameRunning){
+            jumpRequest = true;
+        }
+    }
+
+    function resetGame(){
+        gameRunning = true;
+        score = 0;
+        frame = 0;
+        speed = baseSpeed;
+        scoreSpan.innerText = "0";
+        speedSpan.innerText = speed.toFixed(1);
+        coins = [];
+        trains = [];
+        particles = [];
+        playerLane = 1;
+        player.isJumping = false;
+        player.jumpYOffset = 0;
+        player.y = normalY;
+        leftPressed = false;
+        rightPressed = false;
+        jumpRequest = false;
+        jumpCooldown = false;
+        spawnCounter = 0;
+        statusDiv.innerHTML = '<i data-lucide="hand"></i> Deslize ou use setas | Pegue moedas e evite trens!';
+        lucide.createIcons();
+        player.x = lanePositions[playerLane] - player.width/2;
+        for(let i=0;i<2;i++) spawnCoin();
+    }
+
+    window.addEventListener('resize', () => {
+        resizeCanvas();
     });
-  }
-}
 
-function draw() {
-  // Fundo
-  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  gradient.addColorStop(0, '#1E1B4B');
-  gradient.addColorStop(1, '#7C3AED');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+    function bindEvents(){
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+        canvas.addEventListener('touchstart', handleTouchStart, {passive: false});
+        canvas.addEventListener('touchmove', handleTouchMove, {passive: false});
+        canvas.addEventListener('touchend', handleTouchEnd);
+        canvas.addEventListener('mousedown', (e) => {
+            if(gameRunning) jumpRequest = true;
+            e.preventDefault();
+        });
+        let mouseDownX = null;
+        canvas.addEventListener('mousemove', (e) => {
+            if(mouseDownX!== null && gameRunning){
+                let diff = e.clientX - mouseDownX;
+                if(Math.abs(diff) > 25){
+                    if(diff > 0 && playerLane < lanes-1) playerLane++;
+                    else if(diff < 0 && playerLane > 0) playerLane--;
+                    mouseDownX = e.clientX;
+                }
+            }
+        });
+        canvas.addEventListener('mousedown', (e) => {
+            mouseDownX = e.clientX;
+            e.preventDefault();
+        });
+        canvas.addEventListener('mouseup', () => { mouseDownX = null; });
+    }
 
-  // Linhas das lanes
-  ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-  ctx.lineWidth = 2;
-  for (let i = 1; i < CONFIG.LANES; i++) {
-    ctx.beginPath();
-    ctx.moveTo(i * CONFIG.LANE_WIDTH, 0);
-    ctx.lineTo(i * CONFIG.LANE_WIDTH, canvas.height);
-    ctx.stroke();
-  }
+    function startGame(){
+        resizeCanvas();
+        bindEvents();
+        resetGame();
+        gameLoop();
+    }
 
-  // Player
-  ctx.drawImage(playerImg, player.x - CONFIG.PLAYER_WIDTH/2, player.y - CONFIG.PLAYER_HEIGHT/2, CONFIG.PLAYER_WIDTH, CONFIG.PLAYER_HEIGHT);
+    restartBtn.addEventListener('click', () => {
+        resetGame();
+    });
 
-  // Obstáculos - Bugs
-  ctx.fillStyle = '#EF4444';
-  obstacles.forEach(obs => {
-    ctx.fillRect(obs.x, obs.y, CONFIG.OBSTACLE_SIZE, CONFIG.OBSTACLE_SIZE);
-    ctx.fillStyle = '#fff';
-    ctx.font = '30px Arial';
-    ctx.fillText('🐛', obs.x + 10, obs.y + 35);
-    ctx.fillStyle = '#EF4444';
-  });
+    startGame();
+})();
 
-  // Moedas - Commits
-  coins.forEach(coin => {
-    ctx.fillStyle = '#10B981';
-    ctx.beginPath();
-    ctx.arc(coin.x + CONFIG.COIN_SIZE/2, coin.y + CONFIG.COIN_SIZE/2, CONFIG.COIN_SIZE/2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#fff';
-    ctx.font = '20px Arial';
-    ctx.fillText('📝', coin.x + 5, coin.y + 22);
-  });
-
-  // Partículas
-  particles.forEach(p => {
-    ctx.fillStyle = p.color;
-    ctx.globalAlpha = p.life / 30;
-    ctx.fillRect(p.x, p.y, 4, 4);
-    ctx.globalAlpha = 1;
-  });
-}
-
-function gameLoop() {
-  update();
-  draw();
-  requestAnimationFrame(gameLoop);
-}
-
-function startGame() {
-  document.getElementById('menu').classList.add('hidden');
-  document.getElementById('gameOver').classList.add('hidden');
-  gameRunning = true;
-  score = 0;
-  speed = CONFIG.BASE_SPEED;
-  obstacles = [];
-  coins = [];
-  player.lane = 1;
-  player.x = canvas.width / 2;
-  document.getElementById('scoreValue').textContent = 0;
-}
-
-function gameOver() {
-  gameRunning = false;
-  if (score > highscore) {
-    highscore = score;
-    localStorage.setItem('gitRunnerHighscore', highscore);
-  }
-  document.getElementById('finalScore').textContent = score;
-  document.getElementById('finalHighscore').textContent = highscore;
-  document.getElementById('highscoreValue').textContent = highscore;
-  document.getElementById('gameOver').classList.remove('hidden');
-}
-
-document.getElementById('btnStart').onclick = startGame;
-document.getElementById('btnRestart').onclick = startGame;
-
-gameLoop();
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+        if (w < 2 * r) r = w / 2;
+        if (h < 2 * r) r = h / 2;
+        this.moveTo(x+r, y);
+        this.lineTo(x+w-r, y);
+        this.quadraticCurveTo(x+w, y, x+w, y+r);
+        this.lineTo(x+w, y+h-r);
+        this.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+        this.lineTo(x+r, y+h);
+        this.quadraticCurveTo(x, y+h, x, y+h-r);
+        this.lineTo(x, y+r);
+        this.quadraticCurveTo(x, y, x+r, y);
+        return this;
+    };
+ }
